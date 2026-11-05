@@ -1,14 +1,18 @@
-FROM node:19 as  build
+FROM node:20 AS build
 
-WORKDIR build_ui_app
-COPY ui/package.json ui/package-lock.json ui/tsconfig.json .
-COPY ui/ .
-RUN npm install
+WORKDIR /build_ui_app
+COPY ui/package.json ui/package-lock.json ui/tsconfig.json ./
+RUN npm ci --no-audit --no-fund
+COPY ui/ ./
 RUN npm run build
 
-FROM papermerge/tivoli:0.4.2 as token_validator
-FROM papermerge/auth-server:0.6.2 as auth_server
-FROM python:3.10 as papermerge_core
+FROM papermerge/tivoli:0.4.2 AS token_validator
+FROM papermerge/auth-server:0.6.2 AS auth_server
+FROM python:3.10-bookworm AS papermerge_core
+
+# Space separated list of Tesseract language codes to install
+# (English is always installed). Example: --build-arg OCR_LANGUAGES="deu fra spa"
+ARG OCR_LANGUAGES="deu"
 
 ENV CORE_APP=/core_app
 ENV PAPERMERGE__DATABASE__URL=sqlite:////db/db.sqlite3
@@ -23,7 +27,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     python3-dev \
     tesseract-ocr \
-    tesseract-ocr-deu \
+    $(for lang in ${OCR_LANGUAGES}; do printf 'tesseract-ocr-%s ' "$lang"; done) \
+    curl \
     imagemagick \
     gcc \
     nginx \
@@ -31,9 +36,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     poppler-utils \
     ghostscript \
     nodejs \
-    npm
+    npm \
+    && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --upgrade poetry roco==0.1.1
+RUN pip install "poetry==1.8.5" roco==0.1.1
 
 RUN python -m venv ${VIRTUAL_ENV}
 
@@ -51,7 +57,8 @@ COPY ./docker/prod/config ${CORE_APP}/config
 COPY ./docker/prod/manage.py ${CORE_APP}/manage.py
 
 COPY ./docker/prod/scripts/ /usr/bin/
-RUN chmod +x /usr/bin/*.sh
+# Strip Windows line endings (CRLF) in case the repo was cloned on Windows
+RUN sed -i "s/\r$//" /run.bash /usr/bin/*.sh /etc/supervisord.conf /etc/nginx/nginx.conf && chmod +x /usr/bin/*.sh
 RUN chmod +x /run.bash
 
 COPY --from=token_validator /tivoli_app/ /tivoli_app
@@ -60,6 +67,9 @@ COPY --from=auth_server /usr/share/nginx/html /usr/share/nginx/html/auth_server
 COPY --from=build /build_ui_app/build/ /usr/share/nginx/html/ui
 
 EXPOSE 80
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=180s --retries=5 \
+    CMD curl -fsS -o /dev/null http://localhost/ || exit 1
 
 ENTRYPOINT ["/run.bash"]
 CMD ["server"]

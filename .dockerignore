@@ -8,3 +8,8 @@ __pycache__
 build
 dist
 tmp
+
+# deployment
+deploy/.env
+ui/node_modules
+media_root

@@ -39,6 +39,14 @@ Papermerge is perfect tool for long term storage of your documents.
 
 Papermerge DMS documentation is available at [https://docs.papermerge.io](https://docs.papermerge.io/)
 
+## Deployment
+
+To deploy the complete web app (UI, REST API, OCR worker, PostgreSQL, Redis and
+optional automatic HTTPS) from this repository, follow **[DEPLOYMENT.md](./DEPLOYMENT.md)**:
+
+    cd deploy && cp .env.example .env   # edit secrets
+    docker compose up -d --build
+
 ## Docker
 
 In order to start Papermerge REST API server as docker image use following command:
