@@ -1,0 +1,11 @@
+# Used only with the "https" compose profile.
+# Caddy obtains and renews a Let's Encrypt certificate for $DOMAIN
+# automatically. DNS for $DOMAIN must point at this server and
+# ports 80/443 must be reachable from the internet.
+{$DOMAIN} {
+	encode gzip
+	request_body {
+		max_size 100MB
+	}
+	reverse_proxy web:80
+}

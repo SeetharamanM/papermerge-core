@@ -1,0 +1,109 @@
+# Production deployment of Papermerge DMS
+#
+#   cd deploy
+#   cp .env.example .env      # then edit .env
+#   docker compose up -d --build
+#
+# Services:
+#   web     - nginx + React UI + REST API + auth server (port HTTP_PORT)
+#   worker  - Celery worker which runs OCR on uploaded documents
+#   db      - PostgreSQL
+#   redis   - message broker / notifications
+#   caddy   - (optional, profile "https") reverse proxy with automatic TLS
+#
+# See ../DEPLOYMENT.md for full instructions.
+
+name: papermerge
+
+x-backend: &backend
+  image: ${PAPERMERGE_IMAGE:-papermerge-core:local}
+  build:
+    context: ..
+    dockerfile: docker/prod/Dockerfile
+    args:
+      OCR_LANGUAGES: ${OCR_LANGUAGES:-deu}
+  restart: unless-stopped
+  environment:
+    PAPERMERGE__SECURITY__SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
+    PAPERMERGE__AUTH__USERNAME: ${ADMIN_USERNAME:-admin}
+    PAPERMERGE__AUTH__EMAIL: ${ADMIN_EMAIL:-admin@example.com}
+    PAPERMERGE__AUTH__PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env}
+    PAPERMERGE__DATABASE__URL: postgresql://${DB_USER:-papermerge}:${DB_PASSWORD:?Set DB_PASSWORD in .env}@db:5432/${DB_NAME:-papermerge}
+    PAPERMERGE__REDIS__URL: redis://redis:6379/0
+    PAPERMERGE__OCR__DEFAULT_LANGUAGE: ${OCR_DEFAULT_LANGUAGE:-deu}
+    PAPERMERGE__MAIN__TIMEZONE: ${TIMEZONE:-Europe/Berlin}
+  volumes:
+    - media:/core_app/media
+    - index_db:/core_app/index_db
+
+services:
+  web:
+    <<: *backend
+    ports:
+      - "${HTTP_BIND:-0.0.0.0}:${HTTP_PORT:-12000}:80"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    <<: *backend
+    command: worker
+    healthcheck:
+      disable: true
+    depends_on:
+      # web runs DB migrations and creates the admin user on start;
+      # wait for it so both containers do not migrate at the same time
+      web:
+        condition: service_healthy
+
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-papermerge}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+      POSTGRES_DB: ${DB_NAME:-papermerge}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  caddy:
+    image: caddy:2
+    profiles: ["https"]
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+
+volumes:
+  postgres_data:
+  redis_data:
+  media:
+  index_db:
+  caddy_data:
+  caddy_config:
