@@ -57,7 +57,8 @@ COPY ./docker/prod/config ${CORE_APP}/config
 COPY ./docker/prod/manage.py ${CORE_APP}/manage.py
 
 COPY ./docker/prod/scripts/ /usr/bin/
-RUN chmod +x /usr/bin/*.sh
+# Strip Windows line endings (CRLF) in case the repo was cloned on Windows
+RUN sed -i "s/\r$//" /run.bash /usr/bin/*.sh /etc/supervisord.conf /etc/nginx/nginx.conf && chmod +x /usr/bin/*.sh
 RUN chmod +x /run.bash
 
 COPY --from=token_validator /tivoli_app/ /tivoli_app
